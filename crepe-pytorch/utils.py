@@ -1,5 +1,23 @@
 import torch
 import numpy as np
+import os
+
+def download_weights(model_capacitiy):
+    try:
+        from urllib.request import urlretrieve
+    except ImportError:
+        from urllib import urlretrieve
+
+    weight_file = 'crepe-{}.pth'.format(model_capacitiy)
+    base_url = 'https://github.com/sweetcocoa/crepe-pytorch/raw/models/'
+
+    # in all other cases, decompress the weights file if necessary
+    package_dir = os.path.dirname(os.path.realpath(__file__))
+    weight_path = os.path.join(package_dir, weight_file)
+    if not os.path.isfile(weight_path):
+        print('Downloading weight file {} from {} ...'.format(weight_path, base_url + weight_file))
+        urlretrieve(base_url + weight_file, weight_path)
+
 
 def to_local_average_cents(salience, center=None):
     """

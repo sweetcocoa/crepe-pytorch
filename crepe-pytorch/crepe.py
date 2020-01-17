@@ -46,11 +46,14 @@ class CREPE(nn.Module):
             self.add_module("conv%d" % i, ConvBlock(f, w, s, in_channel))
 
         self.linear = nn.Linear(64*capacity_multiplier, 360)
-
+        self.load_weight(model_capacity)
+        self.eval()
+        
+    def load_weight(self, model_capacity):
+        download_weights(model_capacity)
         package_dir = os.path.dirname(os.path.realpath(__file__))
         filename = "crepe-{}.pth".format(model_capacity)
         self.load_state_dict(torch.load(os.path.join(package_dir, filename)))
-        self.eval()
 
     def forward(self, x):
         # x : shape (batch, sample)
@@ -63,8 +66,8 @@ class CREPE(nn.Module):
         x = self.linear(x)
         x = torch.sigmoid(x)
         return x
-
-    def get_activation(self, audio, sr, center=True, step_size=10):
+    
+    def get_activation(self, audio, sr, center=True, step_size=10, batch_size=128):
         """     
         audio : (N,) or (C, N)
         """
@@ -92,25 +95,32 @@ class CREPE(nn.Module):
             frames = torch.as_strided(audio, size=(1024, n_frames), stride=(itemsize, hop_length * itemsize))
             frames = frames.transpose(0, 1).clone()
 
-            frames = (frames - torch.mean(frames, axis=1).unsqueeze(-1))
+            frames -= (torch.mean(frames, axis=1).unsqueeze(-1))
             frames /= (torch.std(frames, axis=1).unsqueeze(-1))
 
             return frames    
         
-        
         frames = get_frame(audio, step_size, center)
-        
-        return self.forward(frames)
+        activation_stack = []
+        device = self.linear.weight.device
 
-    def predict(self, audio, sr, viterbi=False, center=True, step_size=10):
-        activation = self.get_activation(audio, sr)
+        for i in range(0, len(frames), batch_size):
+            f = frames[i:min(i+batch_size, len(frames))]
+            f = f.to(device)
+            act = self.forward(f) 
+            activation_stack.append(act.cpu())
+        activation = torch.cat(activation_stack, dim=0)
+        return activation
+
+    def predict(self, audio, sr, viterbi=False, center=True, step_size=10, batch_size=128):
+        activation = self.get_activation(audio, sr, batch_size=batch_size)
         frequency = to_freq(activation)
         confidence = activation.max(dim=1)[0]
         time = torch.arange(confidence.shape[0]) * step_size / 1000.0
         return time, frequency, confidence, activation
 
     def process_file(self, file, output=None, viterbi=False, 
-                     center=True, step_size=10, save_plot=False):
+                     center=True, step_size=10, save_plot=False, batch_size=128):
         try:
             audio, sr = torchaudio.load(file)
         except ValueError:
@@ -121,7 +131,8 @@ class CREPE(nn.Module):
                 audio, sr, 
                 viterbi=viterbi, 
                 center=center,
-                step_size=step_size
+                step_size=step_size,
+                batch_size=batch_size,
                 )
 
         time, frequency, confidence, activation = time.numpy(), frequency.numpy(), confidence.numpy(), activation.numpy()
@@ -143,3 +154,8 @@ class CREPE(nn.Module):
             image = inferno(salience.transpose())
 
             imwrite(plot_file, (255 * image).astype(np.uint8))
+
+
+if __name__ == "__main__":
+    cr = CREPE().cuda()
+    cr.process_file("../../ddsp/sample_wav/VI.+Double.wav", "./")
