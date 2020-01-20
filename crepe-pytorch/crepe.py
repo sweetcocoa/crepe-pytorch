@@ -81,15 +81,13 @@ class CREPE(nn.Module):
                 audio = audio[0]
             else:
                 audio = audio.mean(dim=0) # make mono
-        
-        def get_frame(audio, step_size=10, center=True):
+
+        def get_frame(audio, step_size, center):
             if center:
                 audio = nn.functional.pad(audio, pad=(512, 512))
-
             # make 1024-sample frames of the audio with hop length of 10 milliseconds
             hop_length = int(16000 * step_size / 1000)
             n_frames = 1 + int((len(audio) - 1024) / hop_length)
-
             assert audio.dtype == torch.float32
             itemsize = 1 # float32 byte size
             frames = torch.as_strided(audio, size=(1024, n_frames), stride=(itemsize, hop_length * itemsize))
@@ -97,7 +95,6 @@ class CREPE(nn.Module):
 
             frames -= (torch.mean(frames, axis=1).unsqueeze(-1))
             frames /= (torch.std(frames, axis=1).unsqueeze(-1))
-
             return frames    
         
         frames = get_frame(audio, step_size, center)
@@ -113,8 +110,8 @@ class CREPE(nn.Module):
         return activation
 
     def predict(self, audio, sr, viterbi=False, center=True, step_size=10, batch_size=128):
-        activation = self.get_activation(audio, sr, batch_size=batch_size)
-        frequency = to_freq(activation)
+        activation = self.get_activation(audio, sr, batch_size=batch_size, step_size=step_size)
+        frequency = to_freq(activation, viterbi=viterbi)
         confidence = activation.max(dim=1)[0]
         time = torch.arange(confidence.shape[0]) * step_size / 1000.0
         return time, frequency, confidence, activation
@@ -158,4 +155,10 @@ class CREPE(nn.Module):
 
 if __name__ == "__main__":
     cr = CREPE().cuda()
-    cr.process_file("../../ddsp/sample_wav/VI.+Double.wav", "./")
+    import glob
+    files = glob.glob("../../ddsp/data/violin/*.wav")
+    # files = ["../../ddsp/data/violin/VI.+Double.wav"]
+    target = "../../ddsp/data/violin/f0_0.004/"
+    from tqdm import tqdm
+    for file in tqdm(files):
+        cr.process_file(file, target, step_size=4, viterbi=True)
