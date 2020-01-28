@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torchaudio
 import os, sys
-from utils import *
+from .utils import *
 import numpy as np
 
 class ConvBlock(nn.Module):
